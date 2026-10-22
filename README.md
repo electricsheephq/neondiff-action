@@ -41,6 +41,8 @@ jobs:
           openai-api-key: ${{ secrets.OPENAI_API_KEY }}
 ```
 
+To run an exact release, pin the commit instead of `@v1`: `uses: electricsheephq/neondiff-action@982aaa354930f9d8d69893797ae59e95ec5d4c7f # v1.0.0`. `@v1` follows later 1.x releases.
+
 NeonDiff reviews each pull request when it opens (drafts are skipped) or is marked ready for review. Later pushes are not reviewed automatically: a maintainer comments `/neondiff review` to review the current head. On a public repository, anyone who opens a pull request triggers one review on your key.
 
 ## What it does and does not do
