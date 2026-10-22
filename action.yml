@@ -32,7 +32,7 @@ inputs:
   neondiff-version:
     description: npm version of neondiff to run.
     required: false
-    default: "1.1.0"
+    default: "1.1.1"
   codex-version:
     description: npm version of @openai/codex to install. 0.163.0 or later enables confined checkout reads.
     required: false
