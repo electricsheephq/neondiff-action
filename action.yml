@@ -1,0 +1,91 @@
+name: NeonDiff Review
+description: AI pull request review with your own OpenAI key. Free for public repositories.
+author: Electric Sheep
+branding:
+  icon: eye
+  color: green
+
+inputs:
+  openai-api-key:
+    description: OpenAI API key that Codex uses for the review. Store it as a repository or organization secret.
+    required: true
+  github-token:
+    description: Token used to read the pull request and post the review.
+    required: false
+    default: ${{ github.token }}
+  license-key:
+    description: NeonDiff Solo or Team license key. Needed only for private and internal repositories.
+    required: false
+    default: ""
+  model:
+    description: Model override. Empty uses the NeonDiff default (gpt-6.1-sol).
+    required: false
+    default: ""
+  reasoning-effort:
+    description: "Reasoning effort: low, medium, high, xhigh or max. Empty uses the NeonDiff default (high)."
+    required: false
+    default: ""
+  dry-run:
+    description: Set to "true" to run the review without posting it.
+    required: false
+    default: "false"
+  neondiff-version:
+    description: npm version of neondiff to run.
+    required: false
+    default: "1.1.0"
+  codex-version:
+    description: npm version of @openai/codex to install. 0.163.0 or later enables confined checkout reads.
+    required: false
+    default: "0.163.0"
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+      with:
+        node-version: "26"
+
+    - name: Install NeonDiff and Codex
+      shell: bash
+      env:
+        NEONDIFF_VERSION: ${{ inputs.neondiff-version }}
+        CODEX_VERSION: ${{ inputs.codex-version }}
+      run: npm install --global --no-fund --no-audit "neondiff@${NEONDIFF_VERSION}" "@openai/codex@${CODEX_VERSION}"
+
+    # Ubuntu 24.04 runners restrict unprivileged user namespaces through AppArmor, which stops the Codex
+    # sandbox, so checkout reads would fail. Lift it on the runner: GitHub-hosted runners are discarded after
+    # the job, but a self-hosted runner keeps the setting until reboot. A runner without sudo keeps the
+    # restriction, and the review then works from the diff alone.
+    - name: Allow the Codex sandbox on Linux runners
+      if: runner.os == 'Linux'
+      shell: bash
+      run: |
+        if [ "$(cat /proc/sys/kernel/apparmor_restrict_unprivileged_userns 2>/dev/null || echo 0)" = "1" ]; then
+          sudo -n sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 \
+            || echo "::warning::Could not allow user namespaces; checkout reads will not work on this runner."
+        fi
+
+    - name: Review the pull request
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+        OPENAI_API_KEY: ${{ inputs.openai-api-key }}
+        INPUT_LICENSE_KEY: ${{ inputs.license-key }}
+        INPUT_MODEL: ${{ inputs.model }}
+        INPUT_REASONING_EFFORT: ${{ inputs.reasoning-effort }}
+        INPUT_DRY_RUN: ${{ inputs.dry-run }}
+      run: |
+        set -euo pipefail
+        # The license key reaches NeonDiff only as a runner-owned 0600 file; a raw key in the environment is ignored.
+        if [ -n "${INPUT_LICENSE_KEY}" ]; then
+          key_file="${RUNNER_TEMP}/neondiff-license-key"
+          (umask 077 && printf '%s' "${INPUT_LICENSE_KEY}" > "${key_file}")
+          export NEONDIFF_LICENSE_KEY_FILE="${key_file}"
+        fi
+        unset INPUT_LICENSE_KEY
+        # NeonDiff rejects an empty reasoning effort, so export the effort and model only when set.
+        if [ -n "${INPUT_MODEL}" ]; then export NEONDIFF_MODEL="${INPUT_MODEL}"; fi
+        if [ -n "${INPUT_REASONING_EFFORT}" ]; then export NEONDIFF_REASONING_EFFORT="${INPUT_REASONING_EFFORT}"; fi
+        args=(review-pr --ci)
+        if [ "${INPUT_DRY_RUN}" = "true" ]; then args+=(--dry-run true); fi
+        neondiff "${args[@]}"
